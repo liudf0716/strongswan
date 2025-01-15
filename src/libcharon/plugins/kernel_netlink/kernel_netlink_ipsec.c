@@ -139,7 +139,7 @@ struct kernel_algorithm_t {
 	const char *name;
 };
 
-ENUM(xfrm_msg_names, XFRM_MSG_NEWSA, XFRM_MSG_MAPPING,
+ENUM(xfrm_msg_names, XFRM_MSG_NEWSA, __XFRM_MSG_MAX,
 	"XFRM_MSG_NEWSA",
 	"XFRM_MSG_DELSA",
 	"XFRM_MSG_GETSA",
@@ -162,10 +162,13 @@ ENUM(xfrm_msg_names, XFRM_MSG_NEWSA, XFRM_MSG_MAPPING,
 	"XFRM_MSG_GETSADINFO",
 	"XFRM_MSG_NEWSPDINFO",
 	"XFRM_MSG_GETSPDINFO",
-	"XFRM_MSG_MAPPING"
+	"XFRM_MSG_MAPPING",
+	"XFRM_MSG_SETDEFAULT",
+	"XFRM_MSG_GETDEFAULT",
+	"XFRM_MSG_MAX",
 );
 
-ENUM(xfrm_attr_type_names, XFRMA_UNSPEC, XFRMA_OFFLOAD_DEV,
+ENUM(xfrm_attr_type_names, XFRMA_UNSPEC, __XFRMA_MAX,
 	"XFRMA_UNSPEC",
 	"XFRMA_ALG_AUTH",
 	"XFRMA_ALG_CRYPT",
@@ -195,6 +198,12 @@ ENUM(xfrm_attr_type_names, XFRMA_UNSPEC, XFRMA_OFFLOAD_DEV,
 	"XFRMA_ADDRESS_FILTER",
 	"XFRMA_PAD",
 	"XFRMA_OFFLOAD_DEV",
+	"XFRMA_SET_MARK",
+	"XFRMA_SET_MARK_MASK",
+	"XFRMA_IF_ID",
+	"XFRMA_MTIMER_THRESH",
+	"XFRMA_SA_DIR",
+	"XFRMA_MAX",
 );
 
 /**
@@ -352,6 +361,11 @@ struct private_kernel_netlink_ipsec_t {
 	 * Whether the kernel reports the last use time on SAs
 	 */
 	bool sa_lastused;
+
+	/**
+	 * Whether the kernel supports setting the SA direction
+	 */
+	bool sa_dir;
 
 	/**
 	 * Whether to install routes along policies
@@ -1179,114 +1193,6 @@ METHOD(kernel_ipsec_t, get_features, kernel_feature_t,
 }
 
 /**
- * Get an SPI for a specific protocol from the kernel.
- */
-static status_t get_spi_internal(private_kernel_netlink_ipsec_t *this,
-	host_t *src, host_t *dst, uint8_t proto, uint32_t min, uint32_t max,
-	uint32_t *spi)
-{
-	netlink_buf_t request;
-	struct nlmsghdr *hdr, *out;
-	struct xfrm_userspi_info *userspi;
-	uint32_t received_spi = 0;
-	size_t len;
-
-	memset(&request, 0, sizeof(request));
-
-	hdr = &request.hdr;
-	hdr->nlmsg_flags = NLM_F_REQUEST;
-	hdr->nlmsg_type = XFRM_MSG_ALLOCSPI;
-	hdr->nlmsg_len = NLMSG_LENGTH(sizeof(struct xfrm_userspi_info));
-
-	userspi = NLMSG_DATA(hdr);
-	host2xfrm(src, &userspi->info.saddr);
-	host2xfrm(dst, &userspi->info.id.daddr);
-	userspi->info.id.proto = proto;
-	userspi->info.mode = XFRM_MODE_TUNNEL;
-	userspi->info.family = src->get_family(src);
-	userspi->min = min;
-	userspi->max = max;
-
-	if (this->socket_xfrm->send(this->socket_xfrm, hdr, &out, &len) == SUCCESS)
-	{
-		hdr = out;
-		while (NLMSG_OK(hdr, len))
-		{
-			switch (hdr->nlmsg_type)
-			{
-				case XFRM_MSG_NEWSA:
-				{
-					struct xfrm_usersa_info* usersa = NLMSG_DATA(hdr);
-					received_spi = usersa->id.spi;
-					break;
-				}
-				case NLMSG_ERROR:
-				{
-					netlink_log_error(hdr, "allocating SPI failed");
-					break;
-				}
-				default:
-					hdr = NLMSG_NEXT(hdr, len);
-					continue;
-				case NLMSG_DONE:
-					break;
-			}
-			break;
-		}
-		free(out);
-	}
-
-	if (received_spi == 0)
-	{
-		return FAILED;
-	}
-
-	*spi = received_spi;
-	return SUCCESS;
-}
-
-METHOD(kernel_ipsec_t, get_spi, status_t,
-	private_kernel_netlink_ipsec_t *this, host_t *src, host_t *dst,
-	uint8_t protocol, uint32_t *spi)
-{
-	uint32_t spi_min, spi_max;
-
-	spi_min = lib->settings->get_int(lib->settings, "%s.spi_min",
-									 KERNEL_SPI_MIN, lib->ns);
-	spi_max = lib->settings->get_int(lib->settings, "%s.spi_max",
-									 KERNEL_SPI_MAX, lib->ns);
-
-	if (get_spi_internal(this, src, dst, protocol, min(spi_min, spi_max),
-						 max(spi_min, spi_max), spi) != SUCCESS)
-	{
-		DBG1(DBG_KNL, "unable to get SPI");
-		return FAILED;
-	}
-
-	DBG2(DBG_KNL, "got SPI %.8x", ntohl(*spi));
-	return SUCCESS;
-}
-
-METHOD(kernel_ipsec_t, get_cpi, status_t,
-	private_kernel_netlink_ipsec_t *this, host_t *src, host_t *dst,
-	uint16_t *cpi)
-{
-	uint32_t received_spi = 0;
-
-	if (get_spi_internal(this, src, dst, IPPROTO_COMP,
-						 0x100, 0xEFFF, &received_spi) != SUCCESS)
-	{
-		DBG1(DBG_KNL, "unable to get CPI");
-		return FAILED;
-	}
-
-	*cpi = htons((uint16_t)ntohl(received_spi));
-
-	DBG2(DBG_KNL, "got CPI %.4x", ntohs(*cpi));
-	return SUCCESS;
-}
-
-/**
  * Format the mark for debug messages
  */
 static void format_mark(char *buf, int buflen, mark_t mark)
@@ -1373,6 +1279,137 @@ static bool add_uint32(struct nlmsghdr *hdr, int buflen,
 	}
 	*xvalue = value;
 	return TRUE;
+}
+
+/**
+ * Add a uint8 attribute to message
+ */
+static bool add_uint8(struct nlmsghdr *hdr, int buflen,
+					  enum xfrm_attr_type_t type, uint8_t value)
+{
+	uint8_t *xvalue;
+
+	xvalue = netlink_reserve(hdr, buflen, type, sizeof(*xvalue));
+	if (!xvalue)
+	{
+		return FALSE;
+	}
+	*xvalue = value;
+	return TRUE;
+}
+
+/**
+ * Get an SPI for a specific protocol from the kernel.
+ */
+static status_t get_spi_internal(private_kernel_netlink_ipsec_t *this,
+	host_t *src, host_t *dst, uint8_t proto, uint32_t min, uint32_t max,
+	uint32_t *spi)
+{
+	netlink_buf_t request;
+	struct nlmsghdr *hdr, *out;
+	struct xfrm_userspi_info *userspi;
+	uint32_t received_spi = 0;
+	size_t len;
+
+	memset(&request, 0, sizeof(request));
+
+	hdr = &request.hdr;
+	hdr->nlmsg_flags = NLM_F_REQUEST;
+	hdr->nlmsg_type = XFRM_MSG_ALLOCSPI;
+	hdr->nlmsg_len = NLMSG_LENGTH(sizeof(struct xfrm_userspi_info));
+
+	userspi = NLMSG_DATA(hdr);
+	host2xfrm(src, &userspi->info.saddr);
+	host2xfrm(dst, &userspi->info.id.daddr);
+	userspi->info.id.proto = proto;
+	userspi->info.mode = XFRM_MODE_TUNNEL;
+	userspi->info.family = src->get_family(src);
+	userspi->min = min;
+	userspi->max = max;
+
+	if (this->sa_dir &&
+		!add_uint8(hdr, sizeof(request), XFRMA_SA_DIR, XFRM_SA_DIR_IN))
+	{
+		return FAILED;
+	}
+
+	if (this->socket_xfrm->send(this->socket_xfrm, hdr, &out, &len) == SUCCESS)
+	{
+		hdr = out;
+		while (NLMSG_OK(hdr, len))
+		{
+			switch (hdr->nlmsg_type)
+			{
+				case XFRM_MSG_NEWSA:
+				{
+					struct xfrm_usersa_info* usersa = NLMSG_DATA(hdr);
+					received_spi = usersa->id.spi;
+					break;
+				}
+				case NLMSG_ERROR:
+				{
+					netlink_log_error(hdr, "allocating SPI failed");
+					break;
+				}
+				default:
+					hdr = NLMSG_NEXT(hdr, len);
+					continue;
+				case NLMSG_DONE:
+					break;
+			}
+			break;
+		}
+		free(out);
+	}
+
+	if (received_spi == 0)
+	{
+		return FAILED;
+	}
+
+	*spi = received_spi;
+	return SUCCESS;
+}
+
+METHOD(kernel_ipsec_t, get_spi, status_t,
+	private_kernel_netlink_ipsec_t *this, host_t *src, host_t *dst,
+	uint8_t protocol, uint32_t *spi)
+{
+	uint32_t spi_min, spi_max;
+
+	spi_min = lib->settings->get_int(lib->settings, "%s.spi_min",
+									 KERNEL_SPI_MIN, lib->ns);
+	spi_max = lib->settings->get_int(lib->settings, "%s.spi_max",
+									 KERNEL_SPI_MAX, lib->ns);
+
+	if (get_spi_internal(this, src, dst, protocol, min(spi_min, spi_max),
+						 max(spi_min, spi_max), spi) != SUCCESS)
+	{
+		DBG1(DBG_KNL, "unable to get SPI");
+		return FAILED;
+	}
+
+	DBG2(DBG_KNL, "got SPI %.8x", ntohl(*spi));
+	return SUCCESS;
+}
+
+METHOD(kernel_ipsec_t, get_cpi, status_t,
+	private_kernel_netlink_ipsec_t *this, host_t *src, host_t *dst,
+	uint16_t *cpi)
+{
+	uint32_t received_spi = 0;
+
+	if (get_spi_internal(this, src, dst, IPPROTO_COMP,
+						 0x100, 0xEFFF, &received_spi) != SUCCESS)
+	{
+		DBG1(DBG_KNL, "unable to get CPI");
+		return FAILED;
+	}
+
+	*cpi = htons((uint16_t)ntohl(received_spi));
+
+	DBG2(DBG_KNL, "got CPI %.4x", ntohs(*cpi));
+	return SUCCESS;
 }
 
 /* ETHTOOL_GSSET_INFO is available since 2.6.34 and ETH_SS_FEATURES (enum) and
@@ -1613,7 +1650,7 @@ static bool add_hw_offload_sa(struct nlmsghdr *hdr, int buflen,
 }
 
 /**
- * Add a HW offload attribuet to the given policy-related message.
+ * Add a HW offload attribute to the given policy-related message.
  */
 static bool add_hw_offload_policy(struct nlmsghdr *hdr, int buflen,
 								  policy_entry_t *policy,
@@ -1715,11 +1752,6 @@ METHOD(kernel_ipsec_t, add_sa, status_t,
 	sa->family = id->src->get_family(id->src);
 	sa->mode = mode2kernel(mode);
 
-	if (!data->copy_df)
-	{
-		sa->flags |= XFRM_STATE_NOPMTUDISC;
-	}
-
 	if (!data->copy_ecn)
 	{
 		sa->flags |= XFRM_STATE_NOECN;
@@ -1739,6 +1771,10 @@ METHOD(kernel_ipsec_t, add_sa, status_t,
 	}
 	else
 	{
+		if (!data->copy_df)
+		{
+			sa->flags |= XFRM_STATE_NOPMTUDISC;
+		}
 		switch (data->copy_dscp)
 		{
 			case DSCP_COPY_IN_ONLY:
@@ -2038,15 +2074,23 @@ METHOD(kernel_ipsec_t, add_sa, status_t,
 		}
 	}
 
+	if (this->sa_dir &&
+		!add_uint8(hdr, sizeof(request), XFRMA_SA_DIR,
+				   data->inbound ? XFRM_SA_DIR_IN : XFRM_SA_DIR_OUT))
+	{
+		goto failed;
+	}
+
 	if (id->proto != IPPROTO_COMP)
 	{
-		/* generally, we don't need a replay window for outbound SAs, however,
-		 * when using ESN the kernel rejects the attribute if it is 0 */
+		/* we don't need a replay window for outbound SAs, however, older
+		 * kernels reject the attribute if it is 0 when using ESN, while
+		 * newer kernels reject it if > 0 if the SA's direction is set */
 		if (!data->inbound && data->replay_window)
 		{
-			data->replay_window = data->esn ? 1 : 0;
+			data->replay_window = (data->esn && !this->sa_dir) ? 1 : 0;
 		}
-		if (data->replay_window != 0 && (data->esn || data->replay_window > 32))
+		if (data->esn || data->replay_window > 32)
 		{
 			/* for ESN or larger replay windows we need the new
 			 * XFRMA_REPLAY_ESN_VAL attribute to configure a bitmap */
@@ -2121,14 +2165,13 @@ failed:
 }
 
 /**
- * Get the ESN replay state (i.e. sequence numbers) of an SA.
+ * Get the usage stats (packets/bytes) and classic replay state (i.e. sequence
+ * numbers for small windows/non-ESN) of an SA.
  *
- * Allocates into one the replay state structure we get from the kernel.
+ * Allocates and copies the attributes we get from the kernel.
  */
 static void get_replay_state(private_kernel_netlink_ipsec_t *this,
 							 kernel_ipsec_sa_id_t *sa,
-							 struct xfrm_replay_state_esn **replay_esn,
-							 uint32_t *replay_esn_len,
 							 struct xfrm_replay_state **replay,
 							 struct xfrm_lifetime_cur **lifetime)
 {
@@ -2213,14 +2256,6 @@ static void get_replay_state(private_kernel_netlink_ipsec_t *this,
 				free(*replay);
 				*replay = malloc(RTA_PAYLOAD(rta));
 				memcpy(*replay, RTA_DATA(rta), RTA_PAYLOAD(rta));
-			}
-			if (rta->rta_type == XFRMA_REPLAY_ESN_VAL &&
-				RTA_PAYLOAD(rta) >= sizeof(**replay_esn))
-			{
-				free(*replay_esn);
-				*replay_esn = malloc(RTA_PAYLOAD(rta));
-				*replay_esn_len = RTA_PAYLOAD(rta);
-				memcpy(*replay_esn, RTA_DATA(rta), RTA_PAYLOAD(rta));
 			}
 			rta = RTA_NEXT(rta, rtasize);
 		}
@@ -2433,7 +2468,7 @@ METHOD(kernel_ipsec_t, update_sa, status_t,
 	struct xfrm_replay_state *replay = NULL;
 	struct xfrm_replay_state_esn *replay_esn = NULL;
 	struct xfrm_lifetime_cur *lifetime = NULL;
-	uint32_t replay_esn_len = 0;
+	bool replay_state_seen = FALSE;
 	kernel_ipsec_del_sa_t del = { 0 };
 	status_t status = FAILED;
 	traffic_selector_t *ts;
@@ -2518,8 +2553,7 @@ METHOD(kernel_ipsec_t, update_sa, status_t,
 		goto failed;
 	}
 
-	get_replay_state(this, id, &replay_esn, &replay_esn_len, &replay,
-					 &lifetime);
+	get_replay_state(this, id, &replay, &lifetime);
 
 	/* delete the old SA (without affecting the IPComp SA) */
 	if (del_sa(this, id, &del) != SUCCESS)
@@ -2600,6 +2634,11 @@ METHOD(kernel_ipsec_t, update_sa, status_t,
 					free(ifname);
 				}
 			}
+			if (rta->rta_type == XFRMA_REPLAY_ESN_VAL ||
+				rta->rta_type == XFRMA_REPLAY_VAL)
+			{
+				replay_state_seen = TRUE;
+			}
 			netlink_add_attribute(hdr, rta->rta_type,
 								  chunk_create(RTA_DATA(rta), RTA_PAYLOAD(rta)),
 								  sizeof(request));
@@ -2621,34 +2660,25 @@ METHOD(kernel_ipsec_t, update_sa, status_t,
 		memset(&encap->encap_oa, 0, sizeof (xfrm_address_t));
 	}
 
-	if (replay_esn)
+	if (!replay_state_seen)
 	{
-		struct xfrm_replay_state_esn *state;
-
-		state = netlink_reserve(hdr, sizeof(request), XFRMA_REPLAY_ESN_VAL,
-								replay_esn_len);
-		if (!state)
+		if (replay)
 		{
-			goto failed;
-		}
-		memcpy(state, replay_esn, replay_esn_len);
-	}
-	else if (replay)
-	{
-		struct xfrm_replay_state *state;
+			struct xfrm_replay_state *state;
 
-		state = netlink_reserve(hdr, sizeof(request), XFRMA_REPLAY_VAL,
-								sizeof(*state));
-		if (!state)
-		{
-			goto failed;
+			state = netlink_reserve(hdr, sizeof(request), XFRMA_REPLAY_VAL,
+									sizeof(*state));
+			if (!state)
+			{
+				goto failed;
+			}
+			memcpy(state, replay, sizeof(*state));
 		}
-		memcpy(state, replay, sizeof(*state));
-	}
-	else
-	{
-		DBG1(DBG_KNL, "unable to copy replay state from old SAD entry with "
-			 "SPI %.8x%s", ntohl(id->spi), markstr);
+		else
+		{
+			DBG1(DBG_KNL, "unable to copy replay state from old SAD entry with "
+				 "SPI %.8x%s", ntohl(id->spi), markstr);
+		}
 	}
 	if (lifetime)
 	{
@@ -4139,6 +4169,9 @@ static void check_kernel_features(private_kernel_netlink_ipsec_t *this)
 				/* before 6.2 the kernel only provided the last used time for
 				 * specific outbound IPv6 SAs */
 				this->sa_lastused = a > 6 || (a == 6 && b >= 2);
+				/* 6.10 added support for SA direction and enforces certain
+				 * flags e.g. 0 replay window for outbound SAs */
+				this->sa_dir = a > 6 || (a == 6 && b >= 10);
 				break;
 			default:
 				break;

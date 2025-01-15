@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2008-2022 Tobias Brunner
+ * Copyright (C) 2008-2024 Tobias Brunner
  * Copyright (C) 2005-2011 Martin Willi
  * Copyright (C) 2005 Jan Hutter
  *
@@ -1151,6 +1151,7 @@ static status_t check_and_put_init_hash(private_ike_sa_manager_t *this,
 	spi = get_spi(this);
 	if (!spi)
 	{
+		mutex->unlock(mutex);
 		return FAILED;
 	}
 
@@ -1326,29 +1327,31 @@ METHOD(ike_sa_manager_t, checkout_by_message, ike_sa_t*,
 		 be64toh(id->get_initiator_spi(id)),
 		 be64toh(id->get_responder_spi(id)));
 
-	if (id->get_responder_spi(id) == 0 &&
-		message->get_message_id(message) == 0)
+	if (message->get_request(message) &&
+		message->get_exchange_type(message) == IKE_SA_INIT)
 	{
-		if (message->get_major_version(message) == IKEV2_MAJOR_VERSION)
+		untrack_half_open = TRUE;
+
+		if (message->get_message_id(message) == 0 &&
+			id->get_responder_spi(id) == 0)
 		{
-			if (message->get_exchange_type(message) == IKE_SA_INIT &&
-				message->get_request(message))
-			{
-				ike_version = IKEV2;
-				is_init = TRUE;
-			}
+			ike_version = IKEV2;
+			is_init = TRUE;
 		}
-		else
+	}
+	else if ((message->get_exchange_type(message) == ID_PROT ||
+			  message->get_exchange_type(message) == AGGRESSIVE) &&
+			 id->get_responder_spi(id) == 0)
+	{
+		untrack_half_open = TRUE;
+
+		if (message->get_message_id(message) == 0)
 		{
-			if (message->get_exchange_type(message) == ID_PROT ||
-				message->get_exchange_type(message) == AGGRESSIVE)
-			{
-				ike_version = IKEV1;
-				is_init = TRUE;
-				if (id->is_initiator(id))
-				{	/* not set in IKEv1, switch back before applying to new SA */
-					id->switch_initiator(id);
-				}
+			ike_version = IKEV1;
+			is_init = TRUE;
+			if (id->is_initiator(id))
+			{	/* not set in IKEv1, switch back before applying to new SA */
+				id->switch_initiator(id);
 			}
 		}
 	}
@@ -1359,7 +1362,6 @@ METHOD(ike_sa_manager_t, checkout_by_message, ike_sa_t*,
 		uint64_t our_spi;
 		chunk_t hash;
 
-		untrack_half_open = TRUE;
 		hasher = lib->crypto->create_hasher(lib->crypto, HASH_SHA1);
 		if (!hasher || !get_init_hash(hasher, message, &hash))
 		{
@@ -1560,7 +1562,8 @@ METHOD(ike_sa_manager_t, checkout_by_config, ike_sa_t*,
 			continue;
 		}
 		if (entry->ike_sa->get_state(entry->ike_sa) == IKE_DELETING ||
-			entry->ike_sa->get_state(entry->ike_sa) == IKE_REKEYED)
+			entry->ike_sa->get_state(entry->ike_sa) == IKE_REKEYED ||
+			ike_sa_is_delete_queued(entry->ike_sa))
 		{	/* skip IKE_SAs which are not usable, wake other waiting threads */
 			entry->condvar->signal(entry->condvar);
 			continue;
