@@ -765,6 +765,11 @@ ENUM(sadb_ext_type_names, SADB_EXT_RESERVED, SADB_EXT_MAX,
 	"SADB_X_EXT_SA_REPLAY",
 	"SADB_X_EXT_NEW_ADDRESS_SRC",
 	"SADB_X_EXT_NEW_ADDRESS_DST",
+#ifdef SADB_X_EXT_IF_HW_OFFL
+	"SADB_X_EXT_LFT_CUR_SW_OFFL",
+	"SADB_X_EXT_LFT_CUR_HW_OFFL",
+	"SADB_X_EXT_IF_HW_OFFL",
+#endif
 #endif /* __linux__ */
 #endif /* __APPLE__ */
 );
@@ -1979,7 +1984,7 @@ METHOD(kernel_ipsec_t, update_sa, status_t,
 	}
 #ifndef SADB_X_EXT_NEW_ADDRESS_SRC
 	/* we can't update the SA if any of the ip addresses have changed.
-	 * that's because we can't use SADB_UPDATE and by deleting and readding the
+	 * that's because we can't use SADB_UPDATE and by deleting and re-adding the
 	 * SA the sequence numbers would get lost */
 	if (!id->src->ip_equals(id->src, data->new_src) ||
 		!id->dst->ip_equals(id->dst, data->new_dst))
