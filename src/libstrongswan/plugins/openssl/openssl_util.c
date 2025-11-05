@@ -105,7 +105,6 @@ bool openssl_fingerprint(EVP_PKEY *key, cred_encoding_type_t type, chunk_t *fp)
 {
 	hasher_t *hasher;
 	chunk_t enc;
-	u_char *p;
 
 	if (lib->encoding->get_cache(lib->encoding, type, key, fp))
 	{
@@ -114,14 +113,10 @@ bool openssl_fingerprint(EVP_PKEY *key, cred_encoding_type_t type, chunk_t *fp)
 	switch (type)
 	{
 		case KEYID_PUBKEY_SHA1:
-			enc = chunk_alloc(i2d_PublicKey(key, NULL));
-			p = enc.ptr;
-			i2d_PublicKey(key, &p);
+			enc = openssl_i2chunk(PublicKey, key);
 			break;
 		case KEYID_PUBKEY_INFO_SHA1:
-			enc = chunk_alloc(i2d_PUBKEY(key, NULL));
-			p = enc.ptr;
-			i2d_PUBKEY(key, &p);
+			enc = openssl_i2chunk(PUBKEY, key);
 			break;
 		default:
 			return FALSE;
