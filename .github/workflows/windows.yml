@@ -6,6 +6,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  actions: write
+
 env:
   TESTS_REDUCED_KEYLENGTHS: yes
   CCACHE_COMPRESS: true
@@ -39,18 +42,27 @@ jobs:
       TEST: ${{ matrix.test }}
     steps:
       - uses: actions/checkout@v6
-      - uses: actions/cache@v5
+      - uses: actions/cache/restore@v5
+        id: cache-restore
         with:
           path: ~/.cache/ccache
-          key: ccache-${{ runner.os }}-${{ matrix.test }}-${{ github.sha }}
-          restore-keys: |
-            ccache-${{ runner.os }}-${{ matrix.test }}-
+          key: ccache-${{ runner.os }}-${{ matrix.test }}
       - run: |
           sudo apt-get install -qq ccache
           echo "PATH=/usr/lib/ccache:$PATH" >> $GITHUB_ENV
           ccache -sz
       - uses: ./.github/actions/default
-      - run: ccache -s
+      - run: ccache -sv
+      # delete old cache entry as we currently can't update it any other way
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        if: steps.cache-restore.outputs.cache-hit
+        continue-on-error: true
+        run: gh cache delete -r ${{ github.ref }} ${{ steps.cache-restore.outputs.cache-primary-key }}
+      - uses: actions/cache/save@v5
+        with:
+          path: ~/.cache/ccache
+          key: ${{ steps.cache-restore.outputs.cache-primary-key }}
       - if: ${{ failure() }}
         uses: actions/upload-artifact@v6
         with:
@@ -84,12 +96,11 @@ jobs:
       - run: git config --global core.autocrlf input
         shell: bash
       - uses: actions/checkout@v6
-      - uses: actions/cache@v5
+      - uses: actions/cache/restore@v5
+        id: cache-restore
         with:
           path: ~\AppData\Local\ccache
-          key: ccache-${{ runner.os }}-${{ matrix.test }}-${{ github.sha }}
-          restore-keys: |
-            ccache-${{ runner.os }}-${{ matrix.test }}-
+          key: ccache-${{ runner.os }}-${{ matrix.test }}
       - run: |
           pacman --noconfirm -S --needed mingw-w64-${{ matrix.arch }}-ccache
           ccache -sz
@@ -101,7 +112,18 @@ jobs:
           ./scripts/test.sh
         # sometimes streaming/threading tests hang completely
         timeout-minutes: 30
-      - run: ccache -s
+      - run: ccache -sv
+      # delete old cache entry as we currently can't update it any other way
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        if: steps.cache-restore.outputs.cache-hit
+        continue-on-error: true
+        run: gh cache delete -r ${{ github.ref }} ${{ steps.cache-restore.outputs.cache-primary-key }}
+        shell: bash
+      - uses: actions/cache/save@v5
+        with:
+          path: ~\AppData\Local\ccache
+          key: ${{ steps.cache-restore.outputs.cache-primary-key }}
       - if: ${{ failure() }}
         uses: actions/upload-artifact@v6
         with:

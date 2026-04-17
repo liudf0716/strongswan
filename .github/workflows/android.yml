@@ -6,6 +6,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  actions: write
+
 env:
   CCACHE_BASEDIR: ${{ github.workspace }}
   CCACHE_COMPRESS: true
@@ -42,12 +45,11 @@ jobs:
           echo Using NDK ${NDK_VERSION}
           yes | ${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager --install "ndk;${NDK_VERSION}"
           echo "ANDROID_NDK_ROOT=${ANDROID_HOME}/ndk/${NDK_VERSION}" >> "$GITHUB_OUTPUT"
-      - uses: actions/cache@v5
+      - uses: actions/cache/restore@v5
+        id: cache-restore
         with:
           path: ~/.cache/ccache
-          key: ccache-android-${{ github.sha }}
-          restore-keys: |
-            ccache-android-
+          key: ccache-android
       # necessary for newer versions of the Gradle plugin
       - uses: actions/setup-java@v5
         with:
@@ -61,8 +63,18 @@ jobs:
       - uses: ./.github/actions/default
         env:
           ANDROID_NDK_ROOT: ${{ steps.ndk-install.outputs.ANDROID_NDK_ROOT }}
-      - run: ccache -s
+      - run: ccache -sv
       - uses: actions/upload-artifact@v6
         with:
           name: Lint Results
           path: src/frontends/android/app/build/reports/lint-results*.xml
+      # delete old cache entry as we currently can't update it any other way
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        if: steps.cache-restore.outputs.cache-hit
+        continue-on-error: true
+        run: gh cache delete -r ${{ github.ref }} ${{ steps.cache-restore.outputs.cache-primary-key }}
+      - uses: actions/cache/save@v5
+        with:
+          path: ~/.cache/ccache
+          key: ${{ steps.cache-restore.outputs.cache-primary-key }}

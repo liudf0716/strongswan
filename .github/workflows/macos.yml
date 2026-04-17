@@ -6,6 +6,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  actions: write
+
 env:
   TESTS_REDUCED_KEYLENGTHS: yes
   CCACHE_BASEDIR: ${{ github.workspace }}
@@ -36,12 +39,11 @@ jobs:
       TEST: macos
     steps:
       - uses: actions/checkout@v6
-      - uses: actions/cache@v5
+      - uses: actions/cache/restore@v5
+        id: cache-restore
         with:
           path: ~/Library/Caches/ccache
-          key: ccache-${{ runner.os }}-${{ github.sha }}
-          restore-keys: |
-            ccache-${{ runner.os }}-
+          key: ccache-${{ runner.os }}
       # workaround for conflict between Python installed in the image and via brew
       - run: find /usr/local/bin -lname '*/Library/Frameworks/Python.framework/*' -delete -print
       - run: |
@@ -49,7 +51,17 @@ jobs:
           echo "PATH=$(brew --prefix)/opt/ccache/libexec:$PATH" >> $GITHUB_ENV
           ccache -z
       - uses: ./.github/actions/default
-      - run: ccache -s
+      - run: ccache -sv
+      # delete old cache entry as we currently can't update it any other way
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        if: steps.cache-restore.outputs.cache-hit
+        continue-on-error: true
+        run: gh cache delete -r ${{ github.ref }} ${{ steps.cache-restore.outputs.cache-primary-key }}
+      - uses: actions/cache/save@v5
+        with:
+          path: ~/Library/Caches/ccache
+          key: ${{ steps.cache-restore.outputs.cache-primary-key }}
       - if: ${{ failure() }}
         uses: actions/upload-artifact@v6
         with:
