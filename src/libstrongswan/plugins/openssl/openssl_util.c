@@ -330,11 +330,11 @@ time_t openssl_asn1_to_time(const ASN1_TIME *time)
 	if (time)
 	{
 		chunk = openssl_asn1_str2chunk(time);
-		switch (time->type)
+		switch (ASN1_STRING_type(time))
 		{
 			case V_ASN1_UTCTIME:
 			case V_ASN1_GENERALIZEDTIME:
-				return asn1_to_time(&chunk, time->type);
+				return asn1_to_time(&chunk, ASN1_STRING_type(time));
 			default:
 				break;
 		}
