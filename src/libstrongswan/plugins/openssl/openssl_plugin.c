@@ -777,6 +777,13 @@ PLUGIN_DEFINE(openssl)
 	private_openssl_plugin_t *this;
 	int fips_mode;
 
+	/* prevent OpenSSL from using posix_memalign() if leak detective is enabled,
+	 * which doesn't wrap it */
+	if (lib->leak_detective)
+	{
+		CRYPTO_set_mem_functions((void*)malloc, (void*)realloc, (void*)free);
+	}
+
 	fips_mode = lib->settings->get_int(lib->settings,
 							"%s.plugins.openssl.fips_mode", FIPS_MODE, lib->ns);
 #ifdef OPENSSL_FIPS
