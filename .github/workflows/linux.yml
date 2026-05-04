@@ -104,7 +104,7 @@ jobs:
     continue-on-error: ${{ startsWith(matrix.test, 'openssl') }}
     strategy:
       matrix:
-        test: [ botan, wolfssl, openssl, openssl-3, openssl-awslc, gcrypt ]
+        test: [ botan, wolfssl, openssl, openssl-3, openssl-4, openssl-awslc, gcrypt ]
         os: [ ubuntu-latest, ubuntu-22.04 ]
         leak-detective: [ no, yes ]
         exclude:
@@ -115,6 +115,8 @@ jobs:
             test: wolfssl
           - os: ubuntu-22.04
             test: openssl-3
+          - os: ubuntu-22.04
+            test: openssl-4
           - os: ubuntu-22.04
             test: openssl-awslc
     env:

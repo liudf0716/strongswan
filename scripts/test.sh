@@ -94,7 +94,7 @@ build_tss2()
 
 build_openssl()
 {
-	SSL_REV=openssl-3.6.1
+	: ${SSL_REV=openssl-3.6.1}
 	SSL_DIR=$DEPS_BUILD_DIR/openssl
 	SSL_INS=$DEPS_PREFIX/ssl
 	SSL_OPT="-d shared no-dtls no-ssl3 no-zlib no-idea no-psk
@@ -235,6 +235,10 @@ openssl*)
 	DEPS="libssl-dev"
 	if test "$TEST" = "openssl-3"; then
 		DEPS=""
+		use_custom_openssl $1
+	elif test "$TEST" = "openssl-4"; then
+		DEPS=""
+		SSL_REV=openssl-4.0.0
 		use_custom_openssl $1
 	elif test "$TEST" = "openssl-awslc"; then
 		DEPS="cmake ninja-build golang"
