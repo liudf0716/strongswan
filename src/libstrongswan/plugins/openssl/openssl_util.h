@@ -148,7 +148,7 @@ chunk_t openssl_asn1_int2chunk(const ASN1_INTEGER *asn1);
  * @param name		name to convert
  * @return			identification_t, NULL on error
  */
-identification_t *openssl_x509_name2id(X509_NAME *name);
+identification_t *openssl_x509_name2id(const X509_NAME *name);
 
 /**
  * Check if an ASN1 oid is a an OID known by libstrongswan.
