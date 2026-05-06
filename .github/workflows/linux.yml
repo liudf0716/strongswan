@@ -32,6 +32,7 @@ jobs:
     if: ${{ needs.pre-check.outputs.should_skip != 'true' }}
     runs-on: ${{ matrix.os || 'ubuntu-latest' }}
     strategy:
+      fail-fast: false
       matrix:
         test: [ all, default, printf-builtin ]
         compiler: [ gcc, clang ]
@@ -101,8 +102,8 @@ jobs:
     needs: pre-check
     if: ${{ needs.pre-check.outputs.should_skip != 'true' }}
     runs-on: ${{ matrix.os }}
-    continue-on-error: ${{ startsWith(matrix.test, 'openssl') }}
     strategy:
+      fail-fast: false
       matrix:
         test: [ botan, wolfssl, openssl, openssl-3, openssl-4, openssl-awslc, gcrypt ]
         os: [ ubuntu-latest, ubuntu-22.04 ]
